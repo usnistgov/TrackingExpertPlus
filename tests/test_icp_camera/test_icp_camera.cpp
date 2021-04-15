@@ -58,8 +58,10 @@ Last edited:
 #include "ReaderWriterUtil.h"
 #include "ReadFiles.h"
 #include "ICP.h"  // the ICP class to test
-#include "MatrixTransform.h"
+//#include "MatrixTransform.h"
 #include "GLLineRenderer.h"
+#include "MatrixConv.h"
+#include "KinectAzureCaptureDevice.h"
 
 using namespace texpert;
 
@@ -109,6 +111,12 @@ PointCloud			pc_eval_as_loaded;
 std::string			ref_file = "../data/stanford_bunny_pc.obj";
 std::vector<std::string> files;
 
+MatrixConv* conv = MatrixConv::getInstance();
+
+PointCloudProducer* cam_cloud;
+KinectAzureCaptureDevice* cam;
+bool usingCam = false;
+
 
 //--------------------------------------------------------
 // ICP
@@ -131,6 +139,9 @@ int N = 0;
 string date = "";
 
 
+int sequence_test_case = 0;
+
+
 //--------------------------------------------------------------------
 // Function prototypes.
 void runTest(void);
@@ -138,21 +149,29 @@ void runTestManual(void);
 void startTestManual(void);
 float startAutoICP(void);
 void loadNewObject(void);
-
+void runSequenceTest(void);
+void startAutoICP2(void);
+void findModel(void);
 /*
 Keyboard callback for keyboard interaction. 
 */
 void keyboard_callback( int key, int action) {
 
 
-	//cout << key << " : " << action << endl;
+	cout << key << " : " << action << endl;
 	switch (action) {
 	case 0:  // key up
 	
 		switch (key) {
+		case 44: //,
+		{
+			usingCam = !usingCam;
+			icp->setVerbose(!usingCam, 0);
+			break;
+		}
 		case 87: // w
 		{
-			
+			runTest();
 			break;
 			} 
 		case 78: // n
@@ -203,6 +222,21 @@ void keyboard_callback( int key, int action) {
 				runTestManual();
 				break;
 			}
+		case 79: // o
+		{
+			sequence_test_case = 0;
+			break;
+		}
+		case 80: // p
+		{
+			sequence_test_case++;
+			break;
+		}
+		case 91: // [
+		{
+			startAutoICP2();
+			break;
+		}
 		case 61: // =
 			{
 				run_test++;
@@ -249,8 +283,8 @@ void startTestManual(void)
 
 	// Move the point cloud to it initial position position. 
 
-	PointCloudTransform::Transform(&pc_ref, initial_pos[current_set], initial_rot[current_set] );
-	PointCloudTransform::Transform(&pc_eval, initial_pos[current_set], initial_rot[current_set]);
+	PointCloudTransform::Transform(&pc_ref, pose_result );
+	PointCloudTransform::Transform(&pc_eval, pose_result);
 
 	pose_result = Eigen::Matrix4f::Identity();
 
@@ -284,8 +318,9 @@ void runTestManual(void)
 	
 	
 	// Update teh graphic reference model
-
-	gl_reference_eval->setModelmatrix(MatrixUtils::ICPRt3Mat4( icp->Rt()));
+	glm::mat4 ref_mat;
+	conv->Matrix4f2Mat4(icp->Rt(), ref_mat);
+	gl_reference_eval->setModelmatrix(ref_mat);
 	
 
 	// Update the lines between the point clouds showing the nearest neighbors
@@ -308,46 +343,33 @@ This function runs the complete ICP process until it terminates for the currentl
 */
 float startAutoICP(void)
 { 
-	current_set = run_test;
-	if(current_set >= initial_pos.size()) current_set = 0;
+
 	std::cout << "[INFO] - START AUTO ICP " << std::endl; 
 
 	// set the max iteration to 100. 
 
 	icp->setMaxIterations(200);
 
-
-	// Set the new model
-
-	pc_ref = pc_ref_as_loaded;
-	pc_eval = pc_ref_as_loaded;
-
-
 	// Move the point cloud to its start position and orientation
 
-	PointCloudTransform::Transform(&pc_ref, initial_pos[current_set], initial_rot[current_set] );
-	PointCloudTransform::Transform(&pc_eval, initial_pos[current_set], initial_rot[current_set]);
-
-
-	// Reset the graphics object. 
-
-	gl_reference_eval->setModelmatrix(glm::mat4(1.0));
-	pose_result = Eigen::Matrix4f::Identity();
-
-
-	// run ICP
+	PointCloudTransform::Transform(&pc_ref, pose_result);
+	pc_eval = pc_ref;
 
 	Pose pose;
-	pose.t =  Eigen::Matrix4f::Identity();
+	pose.t = Eigen::Matrix4f::Identity();
+
+	// run ICP
 	icp->compute(pc_ref, pose, pose_result, rms);
-	
 
 	// Update the graphics model matrix and the lines between the nearest neighbors. 
+	glm::mat4 ref_mat;
+	conv->Matrix4f2Mat4(icp->Rt(), ref_mat);
 
-	gl_reference_eval->setModelmatrix( MatrixUtils::ICPRt3Mat4(icp->Rt()));
+	gl_reference_eval->setModelmatrix(ref_mat);
 	gl_knn_lines->updatePoints(pc_ref.points, pc_camera.points , icp->getNN());
 
-	if(current_set >= initial_pos.size()) current_set = 0;
+	//std::cout << "[INFO] - Pose delta\n";
+	//std::cout << icp->Rt() << std::endl;
 
 	return rms;
 }
@@ -362,6 +384,8 @@ void runTest(void)
 	int error_count = 0;
 
 	Sleep(100);
+
+
 
 	while(run_test<5 ){
 
@@ -405,6 +429,36 @@ void loadNewObject(void) {
 	icp->setCameraData(pc_camera_as_loaded);
 }
 
+/*
+	Use the camera point cloud to estimate model pose.
+*/
+void findModel(void) {
+	cam_cloud->process();
+	pc_camera = pc_camera_as_loaded;
+	icp->setCameraData(pc_camera_as_loaded);
+
+	//Low iteration count to make viewport framerate more bearable
+	icp->setMaxIterations(20);
+
+	// Move the point cloud to its start position and orientation
+
+	PointCloudTransform::Transform(&pc_ref, pose_result);
+	pc_eval = pc_ref;
+
+	Pose pose;
+	pose.t = Eigen::Matrix4f::Identity();
+
+	// run ICP (slow framerate at high iteration count.  Pointcloud size problem?)
+	icp->compute(pc_ref, pose, pose_result, rms);
+
+	// Update the graphics model matrix and the lines between the nearest neighbors. 
+	glm::mat4 ref_mat;
+	conv->Matrix4f2Mat4(icp->Rt(), ref_mat);
+
+	gl_reference_eval->setModelmatrix(ref_mat);
+	//gl_knn_lines->updatePoints(pc_ref.points, pc_camera.points, icp->getNN());
+}
+
 
 /*
 The main render and processing loop. 
@@ -425,10 +479,142 @@ void render_loop(glm::mat4 pm, glm::mat4 vm) {
 
 	gl_knn_lines->draw(pm, vm);
 
+
+	runSequenceTest();
+
+	//The camera point cloud loop
+	if (usingCam)
+	{
+		findModel();
+	}
+
 	
 	Sleep(25);
 }
 
+
+
+void runSequenceTest(void) {
+
+
+	switch(sequence_test_case)
+	{
+		case 0:
+		{
+			icp->setMaxIterations(1);
+			icp->setVerbose(true, 0);
+			icp->setRejectMaxAngle(25.0);
+			icp->setRejectMaxDistance(0.5);
+			icp->setRejectionMethod(ICPReject::DIST);
+
+
+			pc_ref = pc_ref_as_loaded;
+			pc_eval = pc_ref;
+			pc_camera = pc_camera_as_loaded;
+			Eigen::Vector3f t(0.1, -0.0, 0.600);
+			Eigen::Vector3f R(45.0, 0.0, 180.0);
+			PointCloudTransform::Transform(&pc_ref, t, R);
+			PointCloudTransform::Transform(&pc_eval, t, R);
+
+
+
+			icp->setCameraData(pc_camera);
+
+			gl_camera_point_cloud->updatePoints();
+			gl_reference_eval->updatePoints();
+			gl_reference_point_cloud->updatePoints();
+			gl_reference_eval->setModelmatrix(glm::mat4(1));
+			gl_reference_point_cloud->setModelmatrix(glm::mat4(1));
+
+			pose_result = Eigen::Matrix4f::Identity();
+			sequence_test_case = 1;
+			break;
+		}
+		case 1:
+
+			break;
+		case 2:
+		{
+			icp->setRejectionMethod(ICPReject::DIST_ANG);
+			PointCloudTransform::Transform(&pc_ref, icp->Rt2());
+			PointCloudTransform::Transform(&pc_eval, icp->Rt2());
+			gl_reference_eval->updatePoints();
+			gl_reference_point_cloud->updatePoints();
+
+			gl_reference_eval->setModelmatrix(glm::mat4(1));
+			gl_reference_point_cloud->setModelmatrix(glm::mat4(1));
+
+			Eigen::Vector3f t(0.05, 0.0, -0.0);
+			Eigen::Vector3f R(0.05, 0.0, -0.0);
+			PointCloudTransform::Transform(&pc_camera, t, R);
+			icp->setCameraData(pc_camera);
+			gl_camera_point_cloud->updatePoints();
+			sequence_test_case = 3;
+			break;	
+		}
+		case 3: // idle
+
+
+
+			break;
+		case 4:
+		{
+			icp->setRejectionMethod(ICPReject::DIST_ANG);
+			PointCloudTransform::Transform(&pc_ref, icp->Rt2());
+			PointCloudTransform::Transform(&pc_eval, icp->Rt2());
+			gl_reference_eval->updatePoints();
+			gl_reference_point_cloud->updatePoints();
+
+			gl_reference_eval->setModelmatrix(glm::mat4(1));
+			gl_reference_point_cloud->setModelmatrix(glm::mat4(1));
+
+			Eigen::Vector3f t(0.02, 0.01, -0.0);
+			Eigen::Vector3f R(0.02, 0.00, -0.0);
+			PointCloudTransform::Transform(&pc_camera, t, R);
+			icp->setCameraData(pc_camera);
+			gl_camera_point_cloud->updatePoints();
+			sequence_test_case = 5;
+			break;
+		}
+		case 5: // idle
+			break;
+	}
+
+}
+
+
+void startAutoICP2(void)
+{
+
+	icp->setMaxIterations(200);
+
+	Pose pose;
+	pose.t = Eigen::Matrix4f::Identity();
+	icp->compute(pc_ref, pose, pose_result, rms);
+
+
+	// Update teh graphic reference model
+
+	glm::mat4 ref_mat;
+	conv->Matrix4f2Mat4(icp->Rt(), ref_mat);
+
+	gl_reference_eval->setModelmatrix(ref_mat);
+	gl_reference_point_cloud->setModelmatrix(ref_mat);
+
+	// Update the lines between the point clouds showing the nearest neighbors
+
+	gl_knn_lines->updatePoints(pc_ref.points, pc_camera.points, icp->getNN());
+
+	
+
+
+
+	// Output the pose
+
+	std::cout << "[INFO] - Pose\n";
+	std::cout << pose_result << std::endl;
+
+}
 
 
 
@@ -453,6 +639,7 @@ int main(int argc, char** argv)
 	std::cout << "n \tenable or disable normal vector rendering." << std::endl;
 	std::cout << "r \tenable or disable the reference model rendering." << std::endl;
 	std::cout << "c \tshow the nearest neighbors between both point clouds. " << std::endl;
+	std::cout << ", \ttoggle running ICP off of the live camera point cloud feed. " << std::endl;
 
 	std::cout << "\n\n" << std::endl;
 
@@ -498,9 +685,10 @@ int main(int argc, char** argv)
 	Load the first object for the test
 	*/
 	sampling_method = SamplingMethod::UNIFORM;
-	sampling_param.grid_x = 0.005;
-	sampling_param.grid_y = 0.005;
-	sampling_param.grid_z = 0.005;
+	sampling_param.grid_x = 0.01;
+	sampling_param.grid_y = 0.01;
+	sampling_param.grid_z = 0.01;
+	sampling_param.uniform_step = 7;
 	Sampling::SetMethod(sampling_method, sampling_param);
 
 	ReaderWriterOBJ::Read(ref_file, pc_ref_as_loaded.points, pc_ref_as_loaded.normals, false, false);
@@ -516,15 +704,22 @@ int main(int argc, char** argv)
 	ReaderWriterOBJ::Read(ref_file, pc_eval_as_loaded.points, pc_eval_as_loaded.normals, false, false);
 	Sampling::Run(pc_eval_as_loaded, pc_eval_as_loaded);
 	pc_eval = pc_eval_as_loaded;
-
+	 
 	PointCloudTransform::Transform(&pc_eval, initial_pos[run_test], initial_rot[run_test], false);
 	
 	/*------------------------------------------------------------------------
 	Load the second object for the test. 
 	*/
 	std:string camera_file = files[run_test];
+
+	camera_file = "../data/test/Azure_Kinect_model_1_2020-06-18_05-09-00_pc.ply";
 	ReaderWriterUtil::Read(camera_file, pc_camera_as_loaded.points, pc_camera_as_loaded.normals, true, false);
-	//Sampling::Run(pc_camera_as_loaded, pc_camera_as_loaded);
+	
+	sampling_param.grid_x = 0.01;
+	sampling_param.grid_y = 0.01;
+	sampling_param.grid_z = 0.01;
+	Sampling::SetMethod(sampling_method, sampling_param);
+	Sampling::Run(pc_camera_as_loaded, pc_camera_as_loaded);
 	pc_camera = pc_camera_as_loaded;
 
 
@@ -565,6 +760,8 @@ int main(int argc, char** argv)
 	*/
 	Eigen::Affine3f a_mat;
 	a_mat = pose_result;
+	glm::mat4 a_glmat;
+	conv->Affine3f2Mat4(a_mat, a_glmat);
 
 	// Point cloud showing the reference model.
 	gl_reference_point_cloud = new	isu_ar::GLPointCloudRenderer(pc_ref.points, pc_ref.normals);
@@ -578,7 +775,7 @@ int main(int argc, char** argv)
 	gl_reference_eval->setNormalColor(glm::vec3(0.5,0.8,0.8));
 	gl_reference_eval->setNormalGfxLength(0.02f);
 	gl_reference_eval->enablePointRendering(true);
-	gl_reference_eval->setModelmatrix(MatrixUtils::Affine3f2Mat4(a_mat));
+	gl_reference_eval->setModelmatrix(a_glmat);
 
 	// Point cloud showing the camera data. 
 	gl_camera_point_cloud = new	isu_ar::GLPointCloudRenderer(pc_camera.points, pc_camera.normals);
@@ -592,9 +789,15 @@ int main(int argc, char** argv)
 	gl_knn_lines = new isu_ar::GLLineRenderer(pc_ref.points, pc_camera.points, icp->getNN());
 	gl_knn_lines->updatePoints();
 
+	// Camera point cloud producer
+	cam = new KinectAzureCaptureDevice(0, KinectAzureCaptureDevice::Mode::RGBIRD, false);
+	cam_cloud = new PointCloudProducer(*cam, pc_camera_as_loaded);
+
+	sampling_param.uniform_step = 10;
+	cam_cloud->setSampingMode(sampling_method, sampling_param);
 
 	//thread_1.lock(); // block the start until the render window is up
-	std::thread test_run_static(runTest);  
+	//std::thread test_run_static(runTest);
 	
 
 	//Sleep(100);
@@ -604,7 +807,7 @@ int main(int argc, char** argv)
 
 
 	// delete all instances. 
-	test_run_static.detach();
+	//test_run_static.detach();
 	delete window;
 	
 

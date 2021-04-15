@@ -75,6 +75,10 @@ Aug 06, 2020, RR
 Aug 07, 2020, RR
 - Added code to check the parameters ranges. 
 
+Mar 08, 2021, WB
+- Fixed ICP Rt to return a non-transposed matrix
+- Transferred most Rt calculations to the PointCloudTrans class
+
 */
 
 
@@ -96,6 +100,8 @@ Aug 07, 2020, RR
 #include "Types.h"
 #include "MatrixUtils.h"
 #include "PointCloudUtils.h"
+#include "MatrixConv.h"
+#include "PointCloudTrans.h"
 
 namespace texpert{
 
@@ -177,7 +183,7 @@ public:
 	Return the overall rotation after ICP terminates. 
 	@return a 3x3 matrix with the last rotation. 
 	*/
-	Matrix3f R(void) {return _R_all.inverse();}		
+	Matrix3f R(void) {return _R_all;}		
 
 	/*!
 	Return the overall translation after ICP terminates. 
@@ -196,6 +202,9 @@ public:
 	its counterpart in the camera point set. 
 	*/
 	Matrix4f Rt(void);
+
+
+	Matrix4f Rt2(void);
 
 
 	//-------------------------------------------------------------------------------
@@ -245,6 +254,8 @@ private:
 	Matrix4f				_Rt_initial;//inintial pose
 	Affine3f				_Rt_affine; // initial pose
 
+	Matrix4f				_Rt_final;
+
 	std::vector<Matches>	_local_matches;
 
 	// k-nearest neighbors implementation
@@ -266,6 +277,9 @@ private:
 
 	// helper to debug knn hits
 	std::vector<std::pair<int, int>> _verbose_matches;
+
+	// Matrix conversion singleton class
+	MatrixConv* _conv;
 };
 
 

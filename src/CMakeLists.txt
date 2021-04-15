@@ -150,6 +150,7 @@ set(Header_SRC
 	${PROJECT_SOURCE_DIR}/include/pointcloud/PointCloudEval.h
 	${PROJECT_SOURCE_DIR}/include/pointcloud/MatrixUtils.h
 	${PROJECT_SOURCE_DIR}/include/pointcloud/Utils.h
+	${PROJECT_SOURCE_DIR}/include/pointcloud/PointCloudTrans.h
 	${PROJECT_SOURCE_DIR}/include/utils/TimeUtils.h
 	${PROJECT_SOURCE_DIR}/include/utils/RandomGenerator.h
 	${PROJECT_SOURCE_DIR}/include/utils/LogTypes.h
@@ -157,6 +158,7 @@ set(Header_SRC
 	${PROJECT_SOURCE_DIR}/include/utils/ArgParser.h
 	${PROJECT_SOURCE_DIR}/include/utils/FileUtilsX.h
 	${PROJECT_SOURCE_DIR}/include/utils/MSVerCheck.h
+	${PROJECT_SOURCE_DIR}/include/utils/MatrixConv.h
 	${PROJECT_SOURCE_DIR}/include/loader/ReaderWriter.h
 	${PROJECT_SOURCE_DIR}/include/loader/ReaderWriterOBJ.h
 	${PROJECT_SOURCE_DIR}/include/loader/ReaderWriterPLY.h
@@ -212,6 +214,10 @@ set(Detection_SRC
 	${PROJECT_SOURCE_DIR}/include/detection/CPFMatchingExp.h
 	detection/CPFTools.cpp
 	${PROJECT_SOURCE_DIR}/include/detection/CPFTools.h
+	${PROJECT_SOURCE_DIR}/include/detection/CPFToolsGPU.h
+	detection/CPFToolsGPU.cu
+	${PROJECT_SOURCE_DIR}/include/detection/CPFMatchingExpGPU.h
+	detection/CPFMatchingExpGPU.cpp
 	${PROJECT_SOURCE_DIR}/include/detection/CPFTypes.h
 
 	${PROJECT_SOURCE_DIR}/include/detection/CPFRenderHelpers.h
@@ -266,6 +272,7 @@ set( PointCloud_SRC
 	point_cloud/PointCloudTransform.cpp
 	point_cloud/PointCloudEval.cpp
 	point_cloud/MatrixUtils.cpp
+	point_cloud/PointCloudTrans.cpp
 	cam/KinectAzureCaptureDevice.cpp
 	cam/StructureCoreCaptureDevice.cpp
 	cam/PointCloudProducer.cpp
@@ -299,6 +306,7 @@ set( Utils_SRC
 	utils/LogReaderWriter.cpp
 	utils/ArgParser.cpp
 	utils/FileUtilsX.cpp
+	utils/MatrixConv.cpp
 )
 
 
